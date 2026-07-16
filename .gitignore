@@ -1,0 +1,38 @@
+.reasonix
+7天掌握大模型应用开发.md
+目标 - 大模型应用开发.md
+FastAPI-demo文档.md
+/docs
+/archives
+
+# Python 编译产物
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+.venv/
+
+# 环境变量（含 API Key，绝对不能提交！）
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 数据库文件
+*.db
+*.sqlite3
+migrations/
+
+# OS
+.DS_Store
+Thumbs.db
