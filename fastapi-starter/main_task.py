@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from config.database import init_db
 from config.settings import settings
 from routers import task
+from middleware.auth import APIKeyMiddleware
 
 # ============================================
 # 应用生命周期管理
@@ -57,6 +58,9 @@ app.include_router(task.router)
 @app.get("/", tags=["Health"])
 async def health_check():
     return {"status": "ok", "app": "FastAPI Starter"}
+
+# 添加全局认证中间件（如果需要全局保护）
+# app.add_middleware(APIKeyMiddleware)
 
 if __name__=="__main__":
     import uvicorn
