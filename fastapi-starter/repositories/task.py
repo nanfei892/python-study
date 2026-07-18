@@ -107,7 +107,7 @@ class TaskRepository:
                 setattr(task, key, value)     # 动态设置属性
             
         await self.db.flush()
-        await self.db.refresh()
+        await self.db.refresh(task)
         return task
     
     async def delete(self, task_id: int) -> bool:

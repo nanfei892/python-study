@@ -48,7 +48,7 @@ class TaskResponse(BaseModel):
     description: str
     completed: bool
     created_at: datetime
-    update_at: datetime
+    updated_at: datetime
 
     # model_config 告诉 Pydantic 可以接受 ORM 对象
     # 这让你可以直接传 TASK ORM 对象给 TaskResponse
