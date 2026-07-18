@@ -18,6 +18,8 @@ from config.database import init_db
 from config.settings import settings
 from routers import task
 from middleware.auth import APIKeyMiddleware
+from middleware.error_handler import register_exception_handlers
+from config.logging_config import setup_logging
 
 # ============================================
 # 应用生命周期管理
@@ -61,6 +63,10 @@ async def health_check():
 
 # 添加全局认证中间件（如果需要全局保护）
 # app.add_middleware(APIKeyMiddleware)
+
+# 在 app 创建后注册异常处理
+setup_logging()
+register_exception_handlers(app)
 
 if __name__=="__main__":
     import uvicorn
