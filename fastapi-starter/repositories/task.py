@@ -110,7 +110,7 @@ class TaskRepository:
         await self.db.refresh()
         return task
     
-    async def delte(self, task_id: int) -> bool:
+    async def delete(self, task_id: int) -> bool:
         """删除"""
         task = await self.get_by_id(task_id)
         if task is None:
