@@ -51,35 +51,35 @@ class RouterState(TypedDict):
 """
 StateGraph 高级参数（LangGraph 1.0 新增）
 """
-class State(TypedDict):
-    messages: Annotated[list, add_messages]
+# class State(TypedDict):
+#     messages: Annotated[list, add_messages]
 
-class Context(TypedDict):
-    """运行时不可变上下文（如 API_KEY、用户信息等）"""
-    user_id: str
-    api_key: str
+# class Context(TypedDict):
+#     """运行时不可变上下文（如 API_KEY、用户信息等）"""
+#     user_id: str
+#     api_key: str
 
-class InputState(TypedDict):
-    """约束输入格式"""
-    messages: list
+# class InputState(TypedDict):
+#     """约束输入格式"""
+#     messages: list
 
-class OutputState(TypedDict):
-    """约束输出格式"""
-    response: str
+# class OutputState(TypedDict):
+#     """约束输出格式"""
+#     response: str
 
-graph = StateGraph(
-    state_schema=State,         # 内部状态
-    context_schema=Context,     # 1.0 新增：运行时上下文（不可变，节点只读）
-    input_schema=InputState,    # 1.0 新增：约束输入
-    output_schema=OutputState   # 1.0 新增：约束输出
-)
+# graph = StateGraph(
+#     state_schema=State,         # 内部状态
+#     context_schema=Context,     # 1.0 新增：运行时上下文（不可变，节点只读）
+#     input_schema=InputState,    # 1.0 新增：约束输入
+#     output_schema=OutputState   # 1.0 新增：约束输出
+# )
 
-# 调用时传入 context
-compiled = graph.compile()
-result = compiled.invoke(
-    {"messages": [{"role": "user", "content": "Hellow"}]},
-    context={"user_id": "123", "api_key": "sk-xxx"}
-)
+# # 调用时传入 context
+# compiled = graph.compile()
+# result = compiled.invoke(
+#     {"messages": [{"role": "user", "content": "Hellow"}]},
+#     context={"user_id": "123", "api_key": "sk-xxx"}
+# )
 
 
 """
@@ -156,3 +156,79 @@ def handle_other(state: RouterState) -> dict:
         "result": "您好！我是小深助手。我可以帮您处理投诉反馈或解答问题咨询，请告诉我您需要什么帮助？"
     }
 
+
+"""
+定义路由条件 + 构件图
+"""
+# 4. 条件路由函数
+def route_by_intent(state: RouterState) -> Literal["handle_complaint", "handle_inquiry", "handle_other"]:
+    """
+    根据分类结果，返回下一个节点要执行的节点名
+    返回值必须是已注册的节点名！
+    """
+    intent = state.get("intent", "other")
+    route_map = {
+        "complaint": "handle_complaint",
+        "inquiry": "handle_inquiry"
+    }
+    return route_map.get(intent, "handle_other")
+
+# 5. 构建图
+# 创建 StateGraph，泛型参数为我们的 State 类型
+graph = StateGraph(RouterState)
+
+# ------ 添加节点 ---------
+graph.add_node("classify", classify_intent)
+graph.add_node("handle_complaint", handle_complaint)
+graph.add_node("handle_inquiry", handle_inquiry)
+graph.add_node("handle_other", handle_other)
+
+# ------- 添加边 --------
+# START -> classify：图入口
+graph.add_edge(START, "classify")
+
+# classify -> 条件路由（根据 intent 选择下一个节点）
+graph.add_conditional_edges(
+    "classify",         # 从哪个节点出发
+    route_by_intent,    # 路由函数
+    {
+        "handle_complaint": "handle_complaint",       # 返回值 -> 目标节点
+        "handle_inquiry": "handle_inquiry",
+        "handle_other": "handle_other"      
+    }
+)
+
+# 处理所有节点 -> END
+graph.add_edge("handle_complaint", END)
+graph.add_edge("handle_inquiry", END)
+graph.add_edge("handle_other", END)
+
+# ----- 编译 -----
+app = graph.compile()
+
+
+# ======== 6. 测试 ===========
+async def main():
+    print("=" * 50)
+    print("🧪 客服路由图测试")
+    print("=" * 50)
+
+    test_cases = [
+        "我买的商品有质量问题，用了两天就坏了！",
+        "请问退货流程是什么？",
+        "今天天气真不错"
+    ]
+
+    for i, test_input in enumerate(test_cases, 1):
+        result = app.invoke({
+            "messages": [HumanMessage(content=test_input)],
+            "intent": "",
+            "result": ""
+        })
+
+        print(f"意图：{result['intent']}")
+        print(f"回复：{result['result'][:100]}...")
+
+if __name__=="__main__":
+    import asyncio
+    asyncio.run(main())
