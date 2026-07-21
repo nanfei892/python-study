@@ -229,6 +229,54 @@ async def main():
         print(f"意图：{result['intent']}")
         print(f"回复：{result['result'][:100]}...")
 
+
+"""
+Memory - 对话记忆持久化
+Java对照：InMemorySaver/SqliteSaver ≈ LangChain4j的MemorySaver/SqliteSaver
+
+LangGraph Memory — Checkpoint 持久化
+======================================
+Checkpointer 会自动在每个节点执行后保存状态快照
+这样即使程序重启，对话历史也不会丢失
+
+两种 Save 模式：
+    InMemorySaver: 内存存储（重启丢失，调试用）
+    SqliteSaver:   SQLite 文件持久化（生产用）
+"""
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
+
+# ========== 方式一：InMemorySaver ===========
+memory = InMemorySaver()
+app_with_memory = graph.compile(checkpointer=memory)
+
+# 配置中的 thread_id 类似于“会话ID”
+# 同一个 thread_id 共享历史和 checkpoint
+config = {"configurable": {"thread_id": "user-001"}}
+
+# 第一轮
+result1 = app_with_memory.invoke(
+    {"messages": {HumanMessage(content="我叫张三")}},
+    config=config         # 必须传config
+)
+print(f"Round 1: {result1["messages"][-1].content}")
+
+# 第二轮（自动加载上一轮状态）
+result2 = app_with_memory.invoke(
+    {"messages": {HumanMessage(content="我刚才说我叫什么？")}},
+    config=config         # 同一个 thread_id
+)
+print(f"Round 2: {result2["messages"][-1].content}")
+
+# ============================================
+# 方式二：SqliteSaver（持久化到文件）
+# ============================================
+# ⭐ 新版 API 使用 from_conn_string
+# with SqliteSaver.from_conn_string("langgraph_checkpoints.db") as checkpointer:
+#     graph = workflow.compile(checkpointer=checkpointer)
+
+
 if __name__=="__main__":
     import asyncio
     asyncio.run(main())
