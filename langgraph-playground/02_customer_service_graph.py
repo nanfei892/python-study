@@ -8,6 +8,8 @@
 代码结构与上面完全一致，只需新增节点和条件分支即可。
 """
 from typing import TypedDict, List, Literal, Annotated
+
+from langchain_core.tools import tool
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -45,7 +47,7 @@ def classify_intent(state: RouterState) -> dict:
     user_message = state["messages"][-1].content 
 
     prompt = f""" 分析以下用户消息的意图，只回复以下四个词之一：
-    - complatin （投诉/不满）
+    - complaint （投诉/不满）
     - inquiry   （咨询/提问）
     - feedback  （反馈/建议）
     - other     （其他） 
@@ -59,7 +61,7 @@ def classify_intent(state: RouterState) -> dict:
     intent = response.content.strip().lower()
 
     # 归一化：
-    valid_intents = {"complaint", "inquiry", "feedback", "other"}
+    valid_intents = {"complaint", "inquiry", "feedback", "order", "other"}
     if intent not in valid_intents:
         intent = "other"
 
@@ -106,25 +108,93 @@ def handle_feedback(state: RouterState) -> dict:
         "messages": [AIMessage(content=response.content)]
     }
 
-# 2.5 处理其他消息 other
+# ========= 模拟数据库 ============
+FAKE_DB = {
+    "orders": [
+        {"id": 1, "user": "张三", "product": "Python 入门书", "amount": 39.9, "date": "2026-07-01"},
+        {"id": 2, "user": "张三", "product": "机械键盘", "amount": 299.0, "date": "2026-07-05"},
+        {"id": 3, "user": "李四", "product": "显示器", "amount": 1299.0, "date": "2026-07-10"},
+        {"id": 4, "user": "张三", "product": "鼠标垫", "amount": 19.9, "date": "2026-07-12"},
+        {"id": 5, "user": "王五", "product": "Python 入门书", "amount": 39.9, "date": "2026-07-14"},
+    ],
+    "products": [
+        {"name": "Python 入门书", "stock": 50, "category": "图书"},
+        {"name": "机械键盘", "stock": 30, "category": "外设"},
+        {"name": "显示器", "stock": 15, "category": "外设"},
+        {"name": "鼠标垫", "stock": 100, "category": "外设"},
+    ],
+}
+
+# 定义 tool 函数（查询订单）
+@tool
+def query_order(order_id: int) -> str:
+    """根据订单号查询订单信息
+    Args:
+        order_id: 订单号（整数）
+    """
+    for order in FAKE_DB["orders"]:
+        if order["id"] == order_id:
+            return (
+                f"订单  #{order['id']} \n"
+                f"用户：{order['user']} \n"
+                f"商品：{order['product']} \n"
+                f"金额：{order['amount']} \n"
+                f"日期：{order['date']} \n"
+            )
+    return f"未找到订单号为：{order_id} 的订单。"
+
+
+from langgraph.prebuilt import ToolNode
+# 绑定工具到模型
+model_with_tools = model.bind_tools([query_order])
+
+# 2.5 新增 call_model 节点（LLM + tools）
+def call_model(state: RouterState) -> dict:
+    """LLM 节点： 分析用户需求，决定是否调用工具"""
+    response = model_with_tools.invoke(state["messages"])
+    if response.tool_calls:
+        # 还需要调用工具，只追加消息
+        return {"messages": [response]}
+    else:
+        return {
+            "messages": [response],
+            "result": str(response.content)
+        }
+
+# 工具节点
+tool_node = ToolNode([query_order])
+
+# 2.6 处理其他消息 other
 def handle_other(state: RouterState) -> dict:
     """处理其它消息"""
     return {
         "result": "您好！我是小深助手。我可以帮您处理投诉反馈或解答问题咨询，请告诉我您需要什么帮助？"
     }
 
-
 # 3. 定义路由条件
 # 3.1 条件路由函数
-def route_by_intent(state: RouterState) -> Literal["handle_complaint", "handle_inquiry", "handle_feedback", "handle_other"]:
+def route_by_intent(state: RouterState) -> Literal["handle_complaint", "handle_inquiry", "handle_feedback", "handle_other", "call_model"]:
     """根据分类结果，返回下一个节点要执行的节点名"""
     intent = state.get("intent")
+    user_message = state["messages"][-1].content
+    # 关键：inquiry + 包含 “订单” 走 Tool 路线
+    if intent == "inquiry" and "订单" in user_message:
+        return "call_model"
+
     route_map = {
         "complaint": "handle_complaint",
         "inquiry": "handle_inquiry",
         "feedback": "handle_feedback"
     }
     return route_map.get(intent, "handle_other")
+
+# 3.2 新增条件路由（判断是否调用工具）
+def should_continue(state: RouterState) -> Literal["tools", END]:
+    """检查 LLM 是否想调用工具"""
+    last_message = state["messages"][-1]
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        return "tools"
+    return END
 
 # 4. 构建图
 graph = StateGraph(RouterState)
@@ -135,6 +205,8 @@ graph.add_node("handle_complaint", handle_complaint)
 graph.add_node("handle_inquiry", handle_inquiry)
 graph.add_node("handle_feedback", handle_feedback)
 graph.add_node("handle_other", handle_other)
+graph.add_node("call_model", call_model)
+graph.add_node("tools", tool_node)
 
 # 添加边
 graph.add_edge(START, "classify")
@@ -145,9 +217,16 @@ graph.add_conditional_edges(
         "handle_complaint": "handle_complaint",
         "handle_inquiry": "handle_inquiry",
         "handle_feedback": "handle_feedback",
-        "handle_other": "handle_other"
+        "handle_other": "handle_other",
+        "call_model": "call_model"
     }
 )
+graph.add_conditional_edges(                             # LLM 自主决定是否调用工具
+    "call_model",
+    should_continue,
+    {"tools": "tools", END: END}
+)
+graph.add_edge("tools", "call_model")    # tools 执行完 ——> 回到 call_model（LLM 生成回复）
 
 # 处理所有节点 -> END
 graph.add_edge("handle_complaint", END)
@@ -168,10 +247,11 @@ async def main():
     print("=" * 50)
 
     test_case = [
-        "我买的商品有质量问题，用了两天就坏了！",
-        "请问退货流程是什么？",
-        "我提一个建议，我觉得你们公司的退货流程可以简化一下，退货流程有些复杂，对于中老年人不太优化。",
-        "很好，问题给我解决了！真不错"
+        "帮我查一下订单 3 的状态",
+        # "我买的商品有质量问题，用了两天就坏了！",
+        # "请问退货流程是什么？",
+        # "我提一个建议，我觉得你们公司的退货流程可以简化一下，退货流程有些复杂，对于中老年人不太优化。",
+        # "很好，问题给我解决了！真不错"
     ]
 
     config = {"configurable": {"thread_id": "user-001"}}
