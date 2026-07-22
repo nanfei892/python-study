@@ -32,12 +32,14 @@ from langgraph.graph import add_messages, StateGraph
 
 load_dotenv()
 
+
 # State
 class MultiAgentState(TypedDict):
     messages: Annotated[List, add_messages]
-    user_query: str   # 用户原始问题
-    raw_data: str     # 查询 Agent 返回的原始数据
-    final_report: str    # 总结 Agent 生成的报告
+    user_query: str  # 用户原始问题
+    raw_data: str  # 查询 Agent 返回的原始数据
+    final_report: str  # 总结 Agent 生成的报告
+
 
 # ========= 模拟数据库 ============
 FAKE_DB = {
@@ -63,6 +65,7 @@ model = ChatOpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"),
     temperature=0
 )
+
 
 def query_agent(state: MultiAgentState) -> dict:
     """
@@ -98,6 +101,7 @@ def query_agent(state: MultiAgentState) -> dict:
 
     return {"raw_data": raw_data}
 
+
 def summary_agent(state: MultiAgentState) -> dict:
     """
     总结 Agent: 接收原始数据 -> 用 LLM 生成分析报告
@@ -121,6 +125,7 @@ def summary_agent(state: MultiAgentState) -> dict:
         "messages": [AIMessage(content=report)]
     }
 
+
 # 构建 Multi-agent 图
 multi_graph = StateGraph(MultiAgentState)
 
@@ -132,6 +137,7 @@ multi_graph.add_edge("query_agent", "summary_agent")
 multi_graph.add_edge("summary_agent", END)
 
 app_multi = multi_graph.compile()
+
 
 # 测试
 async def test_multi_agent():
@@ -145,7 +151,7 @@ async def test_multi_agent():
     ]
 
     for query in queries:
-        print(f"\n{'='*40}")
+        print(f"\n{'=' * 40}")
         print(f"👤 用户：{query}")
         result = app_multi.invoke({
             "user_query": query,
@@ -154,6 +160,56 @@ async def test_multi_agent():
         })
         print(f"\n📊 分析报告：\n{result['final_report']}")
 
+
+"""
+流式输出：
+💡 **LangGraph 1.0+ 推荐**：
+
+- **StateGraph**：用 `.stream(version="v2")` —— 返回统一的 `StreamPart` dict
+- **create_agent**：用 `.stream_events(version="v3")` —— 支持 `interleave("messages", "tool_calls")` 多通道交错流式
+
+⚠️ **v1 旧格式** `(mode, chunk)` 元组已不推荐，请使用 `version="v2"`。
+"""
+"""
+StateGraph.stream(version="v2")
+LangGraph 流式输出（v2 格式）
+===============================
+.stream(version="v2") 返回统一的 StreamPart dict，不再需要解包元组
+
+v1 旧格式（不推荐）：
+    for mode, chunk in agent.stream(..., stream_mode=["updates"]):
+        print(mode)   # "updates"
+        print(chunk)  # payload
+
+v2 新格式（⭐ 推荐）：
+    for chunk in agent.stream(..., stream_mode=["updates", "custom"], version="v2"):
+        print(chunk["type"])  # "updates" or "custom"
+        print(chunk["data"])  # payload
+
+与 .invoke() 的区别：
+    .invoke() → 等全部执行完 → 返回最终状态
+    .stream() → 每执行完一个节点 → 立即产出该节点的输出
+"""
+
+
+async def demo_stream():
+    """演示流式输出"""
+    # .stream(version="v2") 返回统一的 StreamPart dict
+    async for chunk in app_multi.astream(
+            {"user_query": "张三的消费情况如何？"},
+            steam_model=["updates"],  # 支持多模式：["updates", "messages", "custom"]
+            version="v2",
+    ):
+        # chunk 是统一的 StreamPart dict: {"type": "updates", "data": {...}}
+        if chunk["type"] == "updates":
+            for node_name, node_output in chunk["data"].items():
+                print(f"\n[{node_name}]产生了输出：")
+                for key, value in node_output.items():
+                    display_value = str(value)[:200] + "..." if len(str(value)) > 200 else str(value)
+                    print(f"{key} = {display_value}")
+
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(test_multi_agent())
+
+    # asyncio.run(test_multi_agent())
+    asyncio.run(demo_stream())
