@@ -5,6 +5,7 @@ FastAPI-demo文档.md
 /docs
 /archives
 .env
+CLAUDE.md
 
 # Python 编译产物
 __pycache__/
