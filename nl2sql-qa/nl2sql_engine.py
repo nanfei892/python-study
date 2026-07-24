@@ -1,6 +1,4 @@
 """NL2SQL 核心引擎（⭐ 核心）"""
-
-
 """
 NL2SQL 核心引擎
 =================
@@ -104,7 +102,6 @@ def extract_schema(db_path: str) -> str:
     conn.close()
 
     return "\n\n".join(schema_parts)
-
 
 class NL2SQLEngine:
     """
